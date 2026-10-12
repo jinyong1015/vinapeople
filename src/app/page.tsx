@@ -341,7 +341,9 @@ export default function DashboardPage() {
               .map((t) => ({
                 id: t.key,
                 label: t.label,
-                shortLabel: TENURE_SHORT_LABELS[t.key] ?? t.label,
+                shortLabel:
+                  TENURE_SHORT_LABELS[t.key as keyof typeof TENURE_SHORT_LABELS] ??
+                  t.label,
                 count: t.count,
                 ratio: t.ratio,
               }))}

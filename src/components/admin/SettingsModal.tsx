@@ -256,7 +256,7 @@ function AdminStatusPanel() {
           <h3 className="settings-section-title">권한 · 로그인</h3>
           <p className="settings-panel-lead">
             {isAdmin
-              ? '관리자 권한이 활성화되어 있습니다. 유휴 30분·로그인 후 최대 8시간이면 만료됩니다.'
+              ? '관리자 권한이 활성화되어 있습니다.'
               : '데이터 업로드·인원 반영은 관리자 로그인이 필요합니다.'}
           </p>
         </div>

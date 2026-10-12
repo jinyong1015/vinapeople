@@ -136,7 +136,6 @@ export function HorizontalBarChart({
               maxBarSize={24}
               background={{
                 fill: 'color-mix(in srgb, var(--border) 35%, transparent)',
-                radius: [0, 10, 10, 0],
               }}
               cursor={interactive ? 'pointer' : 'default'}
               onClick={(_state, index) => {

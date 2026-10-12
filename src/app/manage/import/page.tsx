@@ -29,9 +29,13 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 
 type Step = 'idle' | 'parsed' | 'validated';
 
-/** 파일명 날짜는 후보로만 쓰고, T4가 있으면 기본 제안. 최종은 관리자 확정. */
-function suggestAsOfDate(parsed: ParsePersonnelWorkbookResult): string {
-  return parsed.documentDate ?? parsed.calcBaseDate ?? '';
+/** 반영 기준일 기본값은 오늘(로컬 달력). 파일 후보와 다르면 확인 체크 후 검증. */
+function todayAsOfDate(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 export default function ImportPage() {
@@ -102,7 +106,7 @@ export default function ImportPage() {
       const result = await parsePersonnelWorkbook(buffer, { fileName: file.name });
       setFileName(file.name);
       setParsed(result);
-      setAsOfDate(suggestAsOfDate(result));
+      setAsOfDate(todayAsOfDate());
       setDateAck(false);
       setValidation(null);
       setWarningsAck(false);

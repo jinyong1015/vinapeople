@@ -25,7 +25,7 @@ const FONT_BASE: Partial<ExcelJS.Font> = {
   charset: 129,
 };
 
-const THIN: ExcelJS.Border = { style: 'thin' };
+const THIN: Partial<ExcelJS.Border> = { style: 'thin' };
 const CELL_BORDER: Partial<ExcelJS.Borders> = {
   top: THIN,
   left: THIN,
@@ -124,9 +124,7 @@ export async function buildEmployeesXlsx(
   workbook.creator = 'VINA Workforce';
   workbook.created = new Date();
 
-  const sheet = workbook.addWorksheet('personal- 전체 인원 현황', {
-    properties: { defaultRowFont: { name: '맑은 고딕', size: 10 } },
-  });
+  const sheet = workbook.addWorksheet('personal- 전체 인원 현황');
 
   for (const [col, width] of Object.entries(COL_WIDTHS)) {
     sheet.getColumn(Number(col)).width = width;
