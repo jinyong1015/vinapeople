@@ -172,7 +172,10 @@ function AdminStatusPanel() {
           <li data-allowed="true">대시보드 · 분석 · 인원 관리 조회</li>
           <li data-allowed={isAdmin ? 'true' : 'false'}>데이터 업로드 · 인원 반영</li>
           <li data-allowed={isAdmin ? 'true' : 'false'}>사진 등록·변경·삭제</li>
-          <li data-allowed="true">역할: {role ?? '-'}</li>
+          <li data-allowed="true">
+            역할:{' '}
+            {role === 'admin' ? '관리자' : role === 'user' ? '사용자' : '-'}
+          </li>
         </ul>
       </div>
 

@@ -91,10 +91,7 @@ export default function AttendanceAnalysisPage() {
   if (!supabaseMode) {
     return (
       <>
-        <PageHeader
-          title="근태 분석"
-          description="공장별 결근 비중과 최근 결근 건수 TOP10을 확인합니다."
-        />
+        <PageHeader title="근태 분석" />
         <EmptyState title="Supabase 모드에서만 사용할 수 있습니다" />
       </>
     );
@@ -102,10 +99,7 @@ export default function AttendanceAnalysisPage() {
 
   return (
     <div className="analysis-page space-y-6">
-      <PageHeader
-        title="근태 분석"
-        description="1·2공장 총인원(근무중) 대비 일별 결근 현황과 최근 6개월 결근 건수 TOP10입니다. 사유에 ‘결근’이 포함된 기록만 집계합니다."
-      />
+      <PageHeader title="근태 분석" />
 
       {error ? <p className="manage-error-banner">{error}</p> : null}
 
