@@ -8,6 +8,7 @@ export interface StatusBadgeProps {
 function resolveTone(status: string): 'ok' | 'warn' | 'neutral' {
   if (status === '근무중') return 'ok';
   if (status === '휴직') return 'warn';
+  if (status === '퇴사') return 'neutral';
   return 'neutral';
 }
 

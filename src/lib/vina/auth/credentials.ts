@@ -1,6 +1,11 @@
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
+import { isSupabaseDataSource } from '../dataSource';
 import { hashPassword, looksLikeBcryptHash } from './password';
+import {
+  fetchAdminPasswordHashFromSupabase,
+  upsertAdminPasswordHashToSupabase,
+} from './supabaseAdmin';
 
 export type StoredAdminCredentials = {
   algorithm: 'bcrypt';
@@ -67,18 +72,55 @@ export async function writeCredentialsIfAbsent(
   }
 }
 
+/** Vercel 등 읽기 전용 FS에서 부트스트랩 해시 재계산을 줄이기 위한 프로세스 캐시 */
+let bootstrapHashCache: string | null = null;
+
 /**
  * 검증에 사용할 관리자 비밀번호 해시를 반환한다.
  * 우선순위:
- * 1) VINA_ADMIN_PASSWORD_HASH
- * 2) .data/vina-admin.json
- * 3) (최초 1회) VINA_ADMIN_BOOTSTRAP_PASSWORD → 해시 저장 후 사용
+ * 1) Supabase 모드 → vina_admin_settings (service_role)
+ * 2) VINA_ADMIN_PASSWORD_HASH (IndexedDB/레거시)
+ * 3) .data/vina-admin.json (로컬)
+ * 4) VINA_ADMIN_BOOTSTRAP_PASSWORD → Supabase 또는 파일에 저장
  */
 export async function resolveAdminPasswordHash(): Promise<string | null> {
+  if (isSupabaseDataSource()) {
+    try {
+      const fromDb = await fetchAdminPasswordHashFromSupabase();
+      if (fromDb) return fromDb;
+    } catch (err) {
+      console.error(
+        '[vina-auth] Supabase admin hash resolve failed:',
+        err instanceof Error ? err.message : err,
+      );
+    }
+
+    const bootstrap = process.env.VINA_ADMIN_BOOTSTRAP_PASSWORD?.trim();
+    if (!bootstrap) return null;
+
+    if (bootstrapHashCache && looksLikeBcryptHash(bootstrapHashCache)) {
+      return bootstrapHashCache;
+    }
+
+    const passwordHash = await hashPassword(bootstrap);
+    try {
+      await upsertAdminPasswordHashToSupabase(passwordHash, 'bootstrap');
+    } catch (err) {
+      console.warn(
+        '[vina-auth] Could not persist admin hash to Supabase; using in-memory bootstrap hash.',
+        err instanceof Error ? err.message : err,
+      );
+    }
+    bootstrapHashCache = passwordHash;
+    return passwordHash;
+  }
+
   const fromEnv = process.env.VINA_ADMIN_PASSWORD_HASH?.trim();
   if (fromEnv) {
     if (!looksLikeBcryptHash(fromEnv)) {
-      console.error('[vina-auth] VINA_ADMIN_PASSWORD_HASH is not a valid bcrypt hash');
+      console.error(
+        '[vina-auth] VINA_ADMIN_PASSWORD_HASH must be a bcrypt hash ($2…). Do not put the plain password here.',
+      );
       return null;
     }
     return fromEnv;
@@ -90,16 +132,20 @@ export async function resolveAdminPasswordHash(): Promise<string | null> {
   const bootstrap = process.env.VINA_ADMIN_BOOTSTRAP_PASSWORD?.trim();
   if (!bootstrap) return null;
 
-  // 파일이 이미 있으면 부트스트랩으로 재설정하지 않음
-  const existing = await readStoredCredentials();
-  if (existing) return existing.passwordHash;
+  if (bootstrapHashCache && looksLikeBcryptHash(bootstrapHashCache)) {
+    return bootstrapHashCache;
+  }
 
   const passwordHash = await hashPassword(bootstrap);
-  const created = await writeCredentialsIfAbsent(passwordHash, true);
-  if (!created) {
-    const again = await readStoredCredentials();
-    return again?.passwordHash ?? null;
+  try {
+    await writeCredentialsIfAbsent(passwordHash, true);
+  } catch (err) {
+    console.warn(
+      '[vina-auth] Could not persist .data/vina-admin.json; using bootstrap hash in memory. Prefer VINA_ADMIN_PASSWORD_HASH on Vercel.',
+      err instanceof Error ? err.message : err,
+    );
   }
+  bootstrapHashCache = passwordHash;
   return passwordHash;
 }
 
@@ -107,6 +153,16 @@ export async function resolveAdminPasswordHash(): Promise<string | null> {
 export async function bootstrapAdminCredentials(
   bootstrapPassword: string,
 ): Promise<{ created: boolean; path: string }> {
+  if (isSupabaseDataSource()) {
+    const existing = await fetchAdminPasswordHashFromSupabase();
+    if (existing) {
+      return { created: false, path: 'supabase:vina_admin_settings' };
+    }
+    const passwordHash = await hashPassword(bootstrapPassword);
+    await upsertAdminPasswordHashToSupabase(passwordHash, 'bootstrap');
+    return { created: true, path: 'supabase:vina_admin_settings' };
+  }
+
   const existing = await readStoredCredentials();
   if (existing) {
     return { created: false, path: CREDENTIALS_PATH };

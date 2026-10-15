@@ -6,6 +6,7 @@ import { HorizontalBarChart } from '@/components/charts/HorizontalBarChart';
 import { ShareBarChart } from '@/components/charts/ShareBarChart';
 import { SplitRankChart } from '@/components/charts/SplitRankChart';
 import { VerticalBarChart } from '@/components/charts/VerticalBarChart';
+import { AdminUploadCta } from '@/components/common/AdminUploadCta';
 import { EmptyState } from '@/components/common/EmptyState';
 import { KpiCard } from '@/components/common/KpiCard';
 import { PageHeader } from '@/components/common/PageHeader';
@@ -139,11 +140,7 @@ export default function DashboardPage() {
         <EmptyState
           title="반영된 인원 데이터가 없습니다"
           description="인원 데이터 파일을 반영하면 KPI와 교차표가 표시됩니다."
-          actions={
-            <Link href="/manage/import" className="btn btn-primary">
-              데이터 업로드
-            </Link>
-          }
+          actions={<AdminUploadCta />}
         />
       </>
     );

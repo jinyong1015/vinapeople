@@ -9,9 +9,17 @@
     "lint": "eslint",
     "admin:init": "tsx ./scripts/admin-init.mts",
     "admin:hash": "tsx ./scripts/admin-hash.mts",
-    "auth:smoke": "tsx ./scripts/auth-smoke.mts"
+    "admin:set-password": "tsx ./scripts/admin-set-password.mts",
+    "user:init": "tsx ./scripts/user-init.mts",
+    "user:set-password": "tsx ./scripts/user-init.mts --force",
+    "auth:smoke": "tsx ./scripts/auth-smoke.mts",
+    "auth:roles": "tsx ./scripts/auth-roles-check.mts",
+    "auth:rls": "tsx ./scripts/rls-anon-check.mts",
+    "import:diff-smoke": "tsx ./scripts/import-diff-smoke.mts",
+    "import:rpc-smoke": "tsx ./scripts/import-rpc-smoke.mts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.117.3",
     "bcryptjs": "^3.0.3",
     "date-fns": "^4.4.0",
     "exceljs": "^4.4.0",

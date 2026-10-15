@@ -2,6 +2,7 @@
 
 import { OfficeOrgChart } from '@/components/office/OfficeOrgChart';
 import { EmployeePhotoFrame } from '@/components/detail/EmployeePhotoFrame';
+import { AdminUploadCta } from '@/components/common/AdminUploadCta';
 import { EmptyState } from '@/components/common/EmptyState';
 import { KpiCard } from '@/components/common/KpiCard';
 import { PageHeader } from '@/components/common/PageHeader';
@@ -36,23 +37,27 @@ function officeDefaultFilters(): FilterState {
 export default function OfficePage() {
   const { dataset, personnel, loading } = useWorkforce();
 
-  const [filters, setFilters] = useState<FilterState>(() => {
-    const saved = loadPageViewState<FilterState>(OFFICE_FILTERS_KEY);
-    return saved ? { ...saved, scope: 'office' } : officeDefaultFilters();
-  });
-
-  const [viewMode, setViewMode] = useState<OfficeViewMode>(() => {
-    const saved = loadPageViewState<OfficeViewMode>(OFFICE_VIEW_KEY);
-    return saved === 'list' ? 'list' : 'org';
-  });
+  const [filters, setFilters] = useState<FilterState>(officeDefaultFilters);
+  const [viewMode, setViewMode] = useState<OfficeViewMode>('org');
+  const [storageReady, setStorageReady] = useState(false);
 
   useEffect(() => {
+    const savedFilters = loadPageViewState<FilterState>(OFFICE_FILTERS_KEY);
+    const savedView = loadPageViewState<OfficeViewMode>(OFFICE_VIEW_KEY);
+    if (savedFilters) setFilters({ ...savedFilters, scope: 'office' });
+    if (savedView === 'list' || savedView === 'org') setViewMode(savedView);
+    setStorageReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady) return;
     savePageViewState(OFFICE_FILTERS_KEY, filters);
-  }, [filters]);
+  }, [filters, storageReady]);
 
   useEffect(() => {
+    if (!storageReady) return;
     savePageViewState(OFFICE_VIEW_KEY, viewMode);
-  }, [viewMode]);
+  }, [viewMode, storageReady]);
 
   const filtered = useMemo(
     () => filterPersonnel(personnel, filters),
@@ -83,11 +88,7 @@ export default function OfficePage() {
         <PageHeader title="사무직 인원" />
         <EmptyState
           title="반영된 인원 데이터가 없습니다"
-          actions={
-            <Link href="/manage/import" className="btn btn-primary">
-              데이터 업로드
-            </Link>
-          }
+          actions={<AdminUploadCta />}
         />
       </>
     );

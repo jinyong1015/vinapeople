@@ -1,5 +1,6 @@
 'use client';
 
+import { AdminUploadCta } from '@/components/common/AdminUploadCta';
 import { EmptyState } from '@/components/common/EmptyState';
 import { KpiCard } from '@/components/common/KpiCard';
 import { PageHeader } from '@/components/common/PageHeader';
@@ -7,7 +8,6 @@ import { ResponsiveGrid } from '@/components/common/ResponsiveGrid';
 import { GlobalWorkforceFilter } from '@/components/filters/GlobalWorkforceFilter';
 import type { ActiveDataset } from '@/lib/vina/types';
 import type { FilterState } from '@/lib/vina/types';
-import Link from 'next/link';
 import type { ReactNode } from 'react';
 
 export interface AnalysisPageShellProps {
@@ -41,11 +41,7 @@ export function AnalysisPageShell({
         <PageHeader title={title} description={description} />
         <EmptyState
           title="반영된 인원 데이터가 없습니다"
-          actions={
-            <Link href="/manage/import" className="btn btn-primary">
-              데이터 업로드
-            </Link>
-          }
+          actions={<AdminUploadCta />}
         />
       </>
     );

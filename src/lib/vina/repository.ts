@@ -1,5 +1,25 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import { isSupabaseDataSource } from './dataSource';
 import { DatasetVersionConflictError, type ActiveDataset, type Personnel } from './types';
+
+/**
+ * 데이터 저장소 어댑터.
+ * - indexeddb: 이 모듈의 load/save/clear/update
+ * - supabase: WorkforceProvider → `/api/employees` · import/apply · PATCH (이 모듈 쓰기 경로 사용 금지)
+ */
+export type WorkforceRepositoryMode = 'supabase' | 'indexeddb';
+
+export function getWorkforceRepositoryMode(): WorkforceRepositoryMode {
+  return isSupabaseDataSource() ? 'supabase' : 'indexeddb';
+}
+
+function assertIndexedDbMode(action: string): void {
+  if (isSupabaseDataSource()) {
+    throw new Error(
+      `Supabase 모드에서는 IndexedDB ${action}을(를) 사용할 수 없습니다. API 경로를 사용하세요.`,
+    );
+  }
+}
 
 const DB_NAME = 'vina-workforce-db';
 const DB_VERSION = 1;
@@ -53,6 +73,7 @@ export async function saveActiveDataset(
   data: ActiveDataset,
   expectedVersion?: string,
 ): Promise<ActiveDataset> {
+  assertIndexedDbMode('save');
   const db = await getDb();
   if (expectedVersion !== undefined) {
     const current = await db.get(STORE_NAME, ACTIVE_KEY);
@@ -66,6 +87,7 @@ export async function saveActiveDataset(
 
 /** 이 브라우저에 저장된 활성 인원 데이터를 삭제합니다. */
 export async function clearActiveDataset(): Promise<void> {
+  assertIndexedDbMode('clear');
   const db = await getDb();
   await db.delete(STORE_NAME, ACTIVE_KEY);
 }
@@ -75,6 +97,7 @@ export async function updatePersonnel(
   patch: Partial<Personnel>,
   expectedVersion: string,
 ): Promise<ActiveDataset> {
+  assertIndexedDbMode('update');
   const db = await getDb();
   const current = await db.get(STORE_NAME, ACTIVE_KEY);
   if (!current) {

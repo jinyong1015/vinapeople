@@ -81,7 +81,6 @@ export function EmployeePhotoFrame({
             <div className="detail-photo-empty">
               <UserRound size={40} strokeWidth={1.5} aria-hidden />
               <span>사진 미등록</span>
-              <span className="text-xs opacity-80">Storage 연결 후 표시됩니다</span>
             </div>
           )}
         </div>

@@ -79,6 +79,8 @@ export interface Personnel {
   sourceTenureDays: number | null;
   photoPath: string | null;
   updatedAt: string;
+  /** Supabase 모드에서 마지막 수정자 (IndexedDB에서는 없을 수 있음) */
+  updatedBy?: string | null;
 }
 
 export interface ActiveDatasetMeta {

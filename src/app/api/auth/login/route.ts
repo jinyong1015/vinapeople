@@ -1,11 +1,11 @@
 import {
   ADMIN_SESSION_ABSOLUTE_MAX_AGE_SEC,
-  ADMIN_SESSION_COOKIE,
   ADMIN_SESSION_IDLE_MAX_AGE_SEC,
-  adminSessionCookieOptions,
-  createAdminSessionToken,
-  resolveAdminPasswordHash,
-  verifyPassword,
+  AUTH_SESSION_COOKIE,
+  LEGACY_ADMIN_SESSION_COOKIE,
+  authenticateAppUser,
+  authSessionCookieOptions,
+  createSessionToken,
 } from '@/lib/vina/auth';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
@@ -13,12 +13,18 @@ import { NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 
 export async function POST(request: Request) {
+  let username = '';
   let password = '';
   try {
-    const body = (await request.json()) as { password?: unknown };
-    if (typeof body.password === 'string') {
-      password = body.password;
-    }
+    const body = (await request.json()) as {
+      username?: unknown;
+      password?: unknown;
+      /** @deprecated 관리자 설정 모달 호환 */
+      id?: unknown;
+    };
+    if (typeof body.username === 'string') username = body.username;
+    else if (typeof body.id === 'string') username = body.id;
+    if (typeof body.password === 'string') password = body.password;
   } catch {
     return NextResponse.json(
       { message: '요청 형식이 올바르지 않습니다.' },
@@ -26,46 +32,50 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!password) {
+  if (!username.trim() || !password) {
     return NextResponse.json(
-      { message: '로그인에 실패했습니다.' },
+      { message: '아이디 또는 비밀번호가 올바르지 않습니다.' },
       { status: 401 },
     );
   }
 
-  let passwordHash: string | null;
+  let authenticated: Awaited<ReturnType<typeof authenticateAppUser>>;
   try {
-    passwordHash = await resolveAdminPasswordHash();
-  } catch {
+    authenticated = await authenticateAppUser(username, password);
+  } catch (err) {
+    console.error(
+      '[vina-auth] login failed:',
+      err instanceof Error ? err.message : err,
+    );
     return NextResponse.json(
-      { message: '관리자 인증을 준비할 수 없습니다.' },
+      { message: '인증을 준비할 수 없습니다.' },
       { status: 503 },
     );
   }
 
-  if (!passwordHash) {
+  if (!authenticated) {
     return NextResponse.json(
-      { message: '관리자 인증이 구성되지 않았습니다.' },
-      { status: 503 },
-    );
-  }
-
-  const matched = await verifyPassword(password, passwordHash);
-  // 비밀번호·해시 값을 로그/응답에 남기지 않는다.
-  if (!matched) {
-    return NextResponse.json(
-      { message: '로그인에 실패했습니다.' },
+      { message: '아이디 또는 비밀번호가 올바르지 않습니다.' },
       { status: 401 },
     );
   }
 
-  const token = createAdminSessionToken();
+  const token = createSessionToken(authenticated.role, authenticated.username);
   const jar = await cookies();
-  // 쿠키 수명은 절대 8시간. 유휴 30분은 토큰 lastActivity로 강제한다.
-  jar.set(ADMIN_SESSION_COOKIE, token, adminSessionCookieOptions());
+  jar.set(AUTH_SESSION_COOKIE, token, authSessionCookieOptions());
+  // 레거시 쿠키 제거
+  jar.set(LEGACY_ADMIN_SESSION_COOKIE, '', {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: 0,
+  });
 
   return NextResponse.json({
     ok: true,
+    role: authenticated.role,
+    username: authenticated.username,
     session: {
       absoluteMaxAgeSec: ADMIN_SESSION_ABSOLUTE_MAX_AGE_SEC,
       idleMaxAgeSec: ADMIN_SESSION_IDLE_MAX_AGE_SEC,

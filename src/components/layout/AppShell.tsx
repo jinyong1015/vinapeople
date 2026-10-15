@@ -6,6 +6,7 @@ import {
   ArrowUpRight,
   BarChart3,
   Briefcase,
+  CalendarClock,
   ChevronDown,
   LayoutGrid,
   MoreHorizontal,
@@ -14,7 +15,7 @@ import {
   Users,
 } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   useCallback,
   useEffect,
@@ -40,14 +41,20 @@ const PRIMARY_NAV: NavItem[] = [
     match: (path) => path === '/',
   },
   {
+    href: '/attendance',
+    label: '근태 현황',
+    icon: <CalendarClock className="size-[17px]" aria-hidden />,
+    match: (path) => path === '/attendance' || path.startsWith('/attendance/'),
+  },
+  {
     href: '/office',
-    label: '사무직',
+    label: '사무직 관리',
     icon: <Briefcase className="size-[17px]" aria-hidden />,
     match: (path) => path === '/office' || path.startsWith('/office/'),
   },
   {
     href: '/employees',
-    label: '상세인원',
+    label: '인원 관리',
     icon: <Users className="size-[17px]" aria-hidden />,
     match: (path) => path === '/employees' || path.startsWith('/employees/'),
   },
@@ -85,6 +92,11 @@ const ANALYSIS_NAV: AnalysisNavItem[] = [
     label: '공정별 나이',
     match: (path) => path.startsWith('/analysis/process-age'),
   },
+  {
+    href: '/analysis/attendance',
+    label: '근태 분석',
+    match: (path) => path.startsWith('/analysis/attendance'),
+  },
 ];
 
 const GAP_PX = 8;
@@ -111,7 +123,10 @@ function TopNavigation() {
     const buttons = measure.querySelectorAll<HTMLElement>('[data-nav-measure]');
     const widths = [...buttons].map((el) => el.offsetWidth);
     const available =
-      shell.clientWidth - MORE_BUTTON_WIDTH - ANALYSIS_CHIP_WIDTH - GAP_PX;
+      shell.clientWidth -
+      MORE_BUTTON_WIDTH -
+      ANALYSIS_CHIP_WIDTH -
+      GAP_PX * 2;
     let used = 0;
     let count = 0;
 
@@ -321,31 +336,36 @@ export interface AppShellProps {
 }
 
 export function AppShell({ children }: AppShellProps) {
-  const { isAdmin, openSettings } = useAdmin();
+  const pathname = usePathname();
+  const router = useRouter();
+  const { isAdmin, authenticated, authLoading, openSettings } = useAdmin();
+  const isLoginPage = pathname === '/login';
+
+  useEffect(() => {
+    if (isLoginPage || authLoading || authenticated) return;
+    const from = pathname && pathname !== '/' ? `?from=${encodeURIComponent(pathname)}` : '';
+    router.replace(`/login${from}`);
+  }, [isLoginPage, authLoading, authenticated, pathname, router]);
 
   const headerActions = useMemo(
     () => (
       <>
-        <Link
-          href="/manage/import"
-          className="inline-flex h-11 items-center gap-2 rounded-full border border-line bg-surface px-3.5 text-sm font-medium text-ink shadow-sm transition hover:border-accent/40 hover:bg-accent-soft"
-          onClick={(event) => {
-            if (!isAdmin) {
-              event.preventDefault();
-              openSettings('admin');
-            }
-          }}
-          aria-label={isAdmin ? '데이터 업로드' : '데이터 업로드 (관리자)'}
-        >
-          <Plus size={16} aria-hidden />
-          <span className="hidden md:inline">데이터 업로드</span>
-        </Link>
+        {isAdmin ? (
+          <Link
+            href="/manage/import"
+            className="inline-flex h-11 items-center gap-2 rounded-full border border-line bg-surface px-3.5 text-sm font-medium text-ink shadow-sm transition hover:border-accent/40 hover:bg-accent-soft"
+            aria-label="데이터 업로드"
+          >
+            <Plus size={16} aria-hidden />
+            <span className="hidden md:inline">데이터 업로드</span>
+          </Link>
+        ) : null}
         <button
           type="button"
           className="header-settings-btn inline-flex h-11 items-center gap-2 rounded-full border border-line bg-surface px-3.5 text-sm font-medium text-ink shadow-sm transition hover:border-accent/40 hover:bg-accent-soft"
           onClick={() => openSettings('display')}
           aria-haspopup="dialog"
-          aria-label={isAdmin ? '설정 (관리자 모드)' : '설정'}
+          aria-label={isAdmin ? '설정 (관리자)' : '설정'}
           title="설정"
         >
           <Settings size={16} aria-hidden />
@@ -362,6 +382,22 @@ export function AppShell({ children }: AppShellProps) {
     ),
     [isAdmin, openSettings],
   );
+
+  if (isLoginPage) {
+    return <>{children}</>;
+  }
+
+  if (authLoading) {
+    return (
+      <div className="app-shell flex min-h-screen items-center justify-center">
+        <p className="text-muted text-sm">인증 확인 중…</p>
+      </div>
+    );
+  }
+
+  if (!authenticated) {
+    return null;
+  }
 
   return (
     <div className="app-shell min-h-screen">

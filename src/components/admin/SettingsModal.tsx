@@ -9,9 +9,6 @@ import {
 } from '@/lib/vina/theme';
 import {
   Check,
-  Eye,
-  EyeOff,
-  Lock,
   LogOut,
   Moon,
   Palette,
@@ -120,124 +117,8 @@ function DisplayModePanel() {
   );
 }
 
-function AdminLoginForm({ onCancel }: { onCancel: () => void }) {
-  const { login } = useAdmin();
-  const { pushToast } = useToast();
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const t = window.setTimeout(() => inputRef.current?.focus(), 40);
-    return () => window.clearTimeout(t);
-  }, []);
-
-  const submit = async () => {
-    if (!password.trim() || submitting) return;
-    setSubmitting(true);
-    setError(null);
-    try {
-      const result = await login(password);
-      setPassword('');
-      if (result.ok) {
-        pushToast(result.message, 'success');
-      } else {
-        setError(result.message);
-        inputRef.current?.focus();
-      }
-    } catch {
-      setPassword('');
-      setError('로그인 처리 중 오류가 발생했습니다.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="settings-panel">
-      <div className="settings-panel-intro">
-        <div className="settings-panel-icon settings-panel-icon-lock" aria-hidden="true">
-          <Lock size={18} strokeWidth={2} />
-        </div>
-        <div>
-          <h3 className="settings-section-title">관리자 로그인</h3>
-          <p className="settings-panel-lead">
-            관리자 비밀번호를 입력해 주세요. 데이터 업로드·인원 반영은 관리자만
-            이용할 수 있습니다.
-          </p>
-        </div>
-      </div>
-
-      <form
-        className="settings-login-form"
-        autoComplete="off"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void submit();
-        }}
-      >
-        <label className="settings-field">
-          <span className="settings-field-label">관리자 비밀번호</span>
-          <div className="admin-password-wrap">
-            <input
-              ref={inputRef}
-              type={showPassword ? 'text' : 'password'}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="off"
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-              name="admin-password"
-              placeholder="관리자 비밀번호"
-              disabled={submitting}
-            />
-            <button
-              type="button"
-              className="admin-password-toggle"
-              aria-label={showPassword ? '비밀번호 숨기기' : '비밀번호 표시'}
-              onClick={() => setShowPassword((v) => !v)}
-            >
-              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
-          </div>
-        </label>
-
-        {error ? (
-          <p className="settings-error" role="alert">
-            {error}
-          </p>
-        ) : null}
-
-        <div className="settings-login-actions">
-          <button
-            type="button"
-            className="btn"
-            disabled={submitting}
-            onClick={() => {
-              setPassword('');
-              onCancel();
-            }}
-          >
-            취소
-          </button>
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={submitting || !password.trim()}
-          >
-            {submitting ? '확인 중…' : '로그인'}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
 function AdminStatusPanel() {
-  const { isAdmin, setAdminPanel, logout } = useAdmin();
+  const { isAdmin, username, role, logout } = useAdmin();
   const { pushToast } = useToast();
 
   return (
@@ -257,7 +138,7 @@ function AdminStatusPanel() {
           <p className="settings-panel-lead">
             {isAdmin
               ? '관리자 권한이 활성화되어 있습니다.'
-              : '데이터 업로드·인원 반영은 관리자 로그인이 필요합니다.'}
+              : '조회 전용 사용자로 로그인되어 있습니다. 데이터 관리는 관리자만 가능합니다.'}
           </p>
         </div>
       </div>
@@ -283,41 +164,32 @@ function AdminStatusPanel() {
               )}
               aria-hidden="true"
             />
-            {isAdmin ? '관리자 로그인 중' : '일반 사용자'}
+            {isAdmin ? '관리자' : '사용자'}
+            {username ? ` · ${username}` : ''}
           </span>
         </div>
         <ul className="settings-capability-list">
-          <li data-allowed="true">대시보드 · 분석 · 상세인원 조회</li>
+          <li data-allowed="true">대시보드 · 분석 · 인원 관리 조회</li>
           <li data-allowed={isAdmin ? 'true' : 'false'}>데이터 업로드 · 인원 반영</li>
-          <li data-allowed={isAdmin ? 'true' : 'false'}>활성 인원 데이터 교체</li>
+          <li data-allowed={isAdmin ? 'true' : 'false'}>사진 등록·변경·삭제</li>
+          <li data-allowed="true">역할: {role ?? '-'}</li>
         </ul>
       </div>
 
       <div className="settings-admin-actions">
-        {isAdmin ? (
-          <button
-            type="button"
-            className="btn settings-logout-btn"
-            onClick={() => {
-              void (async () => {
-                await logout();
-                pushToast('관리자 모드가 종료되었습니다.', 'info');
-              })();
-            }}
-          >
-            <LogOut size={16} />
-            로그아웃
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn btn-primary settings-login-btn"
-            onClick={() => setAdminPanel('login')}
-          >
-            <Lock size={16} />
-            관리자 로그인
-          </button>
-        )}
+        <button
+          type="button"
+          className="btn settings-logout-btn"
+          onClick={() => {
+            void (async () => {
+              pushToast('로그아웃했습니다.', 'info');
+              await logout();
+            })();
+          }}
+        >
+          <LogOut size={16} />
+          로그아웃
+        </button>
       </div>
     </div>
   );
@@ -327,7 +199,6 @@ export function SettingsModal() {
   const {
     settingsOpen,
     settingsTab,
-    adminPanel,
     isAdmin,
     setSettingsTab,
     setAdminPanel,
@@ -335,7 +206,6 @@ export function SettingsModal() {
   } = useAdmin();
   const titleId = useId();
   const tabListRef = useRef<HTMLDivElement>(null);
-  const [loginFormKey, setLoginFormKey] = useState(0);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -343,20 +213,14 @@ export function SettingsModal() {
     document.body.style.overflow = 'hidden';
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (settingsTab === 'admin' && adminPanel === 'login') {
-          setAdminPanel('status');
-          return;
-        }
-        closeSettings();
-      }
+      if (e.key === 'Escape') closeSettings();
     };
     window.addEventListener('keydown', onKey);
     return () => {
       document.body.style.overflow = prev;
       window.removeEventListener('keydown', onKey);
     };
-  }, [settingsOpen, settingsTab, adminPanel, closeSettings, setAdminPanel]);
+  }, [settingsOpen, closeSettings]);
 
   if (!settingsOpen) return null;
 
@@ -384,19 +248,11 @@ export function SettingsModal() {
     buttons?.[idx]?.focus();
   };
 
-  const onBackdropClick = () => {
-    if (settingsTab === 'admin' && adminPanel === 'login') {
-      setLoginFormKey((k) => k + 1);
-      return;
-    }
-    closeSettings();
-  };
-
   return (
     <div
       className="settings-modal-backdrop"
       role="presentation"
-      onClick={onBackdropClick}
+      onClick={closeSettings}
     >
       <div
         className="settings-modal"
@@ -485,14 +341,7 @@ export function SettingsModal() {
               aria-labelledby="settings-tab-admin"
               className="settings-tabpanel"
             >
-              {adminPanel === 'login' ? (
-                <AdminLoginForm
-                  key={loginFormKey}
-                  onCancel={() => setAdminPanel('status')}
-                />
-              ) : (
-                <AdminStatusPanel />
-              )}
+              <AdminStatusPanel />
             </div>
           )}
         </div>

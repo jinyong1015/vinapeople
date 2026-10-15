@@ -6,6 +6,8 @@ export interface ConfirmDialogProps {
   open: boolean;
   title: string;
   description?: string;
+  /** 강조 안내 (예: 복구 불가 경고) */
+  note?: string;
   confirmLabel?: string;
   cancelLabel?: string;
   tone?: 'default' | 'danger';
@@ -18,6 +20,7 @@ export function ConfirmDialog({
   open,
   title,
   description,
+  note,
   confirmLabel = '확인',
   cancelLabel = '취소',
   tone = 'default',
@@ -27,6 +30,7 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   const titleId = useId();
   const descId = useId();
+  const noteId = useId();
   const confirmRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -58,7 +62,11 @@ export function ConfirmDialog({
       <div
         role="alertdialog"
         aria-labelledby={titleId}
-        aria-describedby={description ? descId : undefined}
+        aria-describedby={
+          [description ? descId : null, note ? noteId : null]
+            .filter(Boolean)
+            .join(' ') || undefined
+        }
         className="card relative z-10 w-full max-w-md rounded-[20px] p-6 shadow-xl"
       >
         <h2 id={titleId} className="text-lg font-bold">
@@ -67,6 +75,11 @@ export function ConfirmDialog({
         {description ? (
           <p id={descId} className="text-muted mt-2 text-sm font-medium">
             {description}
+          </p>
+        ) : null}
+        {note ? (
+          <p id={noteId} className="mt-2 text-sm font-semibold text-[var(--error)]">
+            {note}
           </p>
         ) : null}
         <div className="mt-6 flex justify-end gap-2">

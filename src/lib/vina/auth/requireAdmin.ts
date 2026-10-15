@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { isAdminRequest } from './session';
+import { getRequestSession, type SessionClaims } from './session';
 
 export type AdminGuardResult =
-  | { ok: true }
+  | { ok: true; session: SessionClaims }
   | { ok: false; response: NextResponse };
 
 /**
@@ -10,13 +10,24 @@ export type AdminGuardResult =
  * UI 숨김과 별개로 서버에서 세션을 검증한다.
  */
 export async function requireAdmin(): Promise<AdminGuardResult> {
-  const ok = await isAdminRequest();
-  if (ok) return { ok: true };
+  const session = await getRequestSession();
+  if (session?.role === 'admin') {
+    return { ok: true, session };
+  }
+  if (!session) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { message: '로그인이 필요합니다.' },
+        { status: 401 },
+      ),
+    };
+  }
   return {
     ok: false,
     response: NextResponse.json(
       { message: '관리자 권한이 필요합니다.' },
-      { status: 401 },
+      { status: 403 },
     ),
   };
 }

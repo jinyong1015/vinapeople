@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense } from 'react';
+import { AdminUploadCta } from '@/components/common/AdminUploadCta';
 import { EmptyState } from '@/components/common/EmptyState';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Pager } from '@/components/common/Pager';
@@ -64,24 +65,42 @@ export default function EmployeesPage() {
   );
 }
 
+function defaultEmployeesView(): EmployeesViewState {
+  return {
+    sortField: 'employeeNo',
+    sortDirection: 'asc',
+    page: 1,
+    pageSize: 20,
+  };
+}
+
 function EmployeesPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { dataset, personnel, loading } = useWorkforce();
 
-  const [filters, setFiltersState] = useState<FilterState>(loadSharedFilters);
-
-  const [view, setView] = useState<EmployeesViewState>(() => {
-    const saved = loadPageViewState<EmployeesViewState>(VIEW_KEY);
-    return {
-      sortField: saved?.sortField ?? 'employeeNo',
-      sortDirection: saved?.sortDirection ?? 'asc',
-      page: saved?.page ?? 1,
-      pageSize: saved?.pageSize ?? 20,
-    };
-  });
+  // SSR·첫 클라이언트 렌더는 동일하게 기본값만 사용 (sessionStorage는 마운트 후 복원)
+  const [filters, setFiltersState] = useState<FilterState>(createDefaultFilterState);
+  const [view, setView] = useState<EmployeesViewState>(defaultEmployeesView);
+  const [storageReady, setStorageReady] = useState(false);
 
   useEffect(() => {
+    const saved = loadPageViewState<EmployeesViewState>(VIEW_KEY);
+    setFiltersState(loadSharedFilters());
+    if (saved) {
+      setView({
+        sortField: saved.sortField ?? 'employeeNo',
+        sortDirection: saved.sortDirection ?? 'asc',
+        page: saved.page ?? 1,
+        pageSize: saved.pageSize ?? 20,
+      });
+    }
+    setStorageReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady) return;
+
     const params = new URLSearchParams(searchParams.toString());
     const fromUrl = parseFilterSearchParams(params);
     const pageParam = Number(params.get('page') ?? '');
@@ -119,15 +138,17 @@ function EmployeesPageContent() {
           : prev.sortField,
       sortDirection: dirParam === 'asc' || dirParam === 'desc' ? dirParam : prev.sortDirection,
     }));
-  }, [searchParams]);
+  }, [searchParams, storageReady]);
 
   useEffect(() => {
+    if (!storageReady) return;
     savePageViewState(GLOBAL_FILTERS_KEY, filters);
-  }, [filters]);
+  }, [filters, storageReady]);
 
   useEffect(() => {
+    if (!storageReady) return;
     savePageViewState(VIEW_KEY, view);
-  }, [view]);
+  }, [view, storageReady]);
 
   const { sortField, sortDirection, page, pageSize } = view;
 
@@ -152,14 +173,12 @@ function EmployeesPageContent() {
 
   const setFilters = useCallback(
     (next: FilterState) => {
+      const nextView: EmployeesViewState = { ...view, page: 1 };
       setFiltersState(next);
-      setView((prev) => {
-        const nextView = { ...prev, page: 1 };
-        router.replace(buildListHref(next, nextView), { scroll: false });
-        return nextView;
-      });
+      setView(nextView);
+      router.replace(buildListHref(next, nextView), { scroll: false });
     },
-    [router, buildListHref],
+    [router, buildListHref, view],
   );
 
   const filtered = useMemo(
@@ -202,14 +221,10 @@ function EmployeesPageContent() {
   if (!loading && !dataset) {
     return (
       <>
-        <PageHeader title="상세인원" />
+        <PageHeader title="인원 관리" />
         <EmptyState
           title="반영된 인원 데이터가 없습니다"
-          actions={
-            <Link href="/manage/import" className="btn btn-primary">
-              데이터 업로드
-            </Link>
-          }
+          actions={<AdminUploadCta />}
         />
       </>
     );
@@ -226,7 +241,7 @@ function EmployeesPageContent() {
         />
       ) : null}
       <PageHeader
-        title="상세인원"
+        title="인원 관리"
         actions={
           <button
             type="button"
@@ -281,6 +296,7 @@ function EmployeesPageContent() {
               <thead>
                 <tr>
                   <th>사번</th>
+                  <th>사진</th>
                   <th>성명</th>
                   <th>근무지</th>
                   <th>공정</th>
@@ -321,6 +337,21 @@ function EmployeesPageContent() {
                           {row.employeeNo}
                         </Link>
                       </td>
+                      <td className="employees-photo-cell">
+                        {row.photoPath ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={row.photoPath}
+                            alt=""
+                            className="employees-list-thumb"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <span className="employees-photo-empty" aria-hidden>
+                            —
+                          </span>
+                        )}
+                      </td>
                       <td>
                         <span className="employees-name">{row.name}</span>
                       </td>
@@ -338,7 +369,7 @@ function EmployeesPageContent() {
                           {row.employmentStatus || '-'}
                         </span>
                       </td>
-                      <td className="num">{row.joinDate ?? '-'}</td>
+                      <td className="employees-join-date">{row.joinDate ?? '-'}</td>
                     </tr>
                   );
                 })}

@@ -15,14 +15,19 @@ export function useAnalysisFilters(pageKey: string) {
   const storageKey = `analysis-${pageKey}`;
   const { dataset, personnel, loading } = useWorkforce();
 
-  const [filters, setFilters] = useState<FilterState>(() => {
-    const saved = loadPageViewState<{ filters: FilterState }>(storageKey);
-    return saved?.filters ?? createDefaultFilterState();
-  });
+  const [filters, setFilters] = useState<FilterState>(createDefaultFilterState);
+  const [storageReady, setStorageReady] = useState(false);
 
   useEffect(() => {
+    const saved = loadPageViewState<{ filters: FilterState }>(storageKey);
+    if (saved?.filters) setFilters(saved.filters);
+    setStorageReady(true);
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (!storageReady) return;
     savePageViewState(storageKey, { filters });
-  }, [filters, storageKey]);
+  }, [filters, storageKey, storageReady]);
 
   const filtered = useMemo(
     () => filterPersonnel(personnel, filters),

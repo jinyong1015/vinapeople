@@ -36,7 +36,7 @@ export function SelectionPreviewPanel({
   const top = ordered.slice(0, 10);
 
   return (
-    <Panel title={title} description="최대 10건 · 상세인원으로 이동">
+    <Panel title={title} description="최대 10건 · 인원 관리로 이동">
       <ul className="divide-y">
         {top.map((item) => (
           <li
@@ -50,7 +50,7 @@ export function SelectionPreviewPanel({
               href={buildEmployeesHref({ ...filters, [paramKey]: [item.id] })}
               className="rounded-full border px-3 py-1 text-xs font-semibold"
             >
-              상세인원
+              인원 관리
             </Link>
           </li>
         ))}

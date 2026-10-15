@@ -17,19 +17,26 @@ export type SettingsTab = 'display' | 'admin';
 export type AdminPanelView = 'status' | 'login';
 
 interface AuthMeResponse {
+  authenticated?: boolean;
   isAdmin?: boolean;
-  role?: UserRole;
+  role?: UserRole | null;
+  username?: string | null;
 }
 
 interface AdminContextValue {
+  authenticated: boolean;
   isAdmin: boolean;
-  role: UserRole;
+  role: UserRole | null;
+  username: string | null;
   authLoading: boolean;
   authError: string | null;
   settingsOpen: boolean;
   settingsTab: SettingsTab;
   adminPanel: AdminPanelView;
-  login: (password: string) => Promise<{ ok: boolean; message: string }>;
+  login: (
+    username: string,
+    password: string,
+  ) => Promise<{ ok: boolean; message: string }>;
   logout: () => Promise<void>;
   openSettings: (tab?: SettingsTab) => void;
   closeSettings: () => void;
@@ -43,13 +50,15 @@ const AdminContext = createContext<AdminContextValue | null>(null);
 async function fetchMe(): Promise<AuthMeResponse> {
   const res = await fetch('/api/auth/me', { credentials: 'include' });
   if (!res.ok) {
-    return { isAdmin: false, role: 'user' };
+    return { authenticated: false, isAdmin: false, role: null, username: null };
   }
   return (await res.json()) as AuthMeResponse;
 }
 
 export function AdminProvider({ children }: { children: ReactNode }) {
-  const [role, setRole] = useState<UserRole>('user');
+  const [authenticated, setAuthenticated] = useState(false);
+  const [role, setRole] = useState<UserRole | null>(null);
+  const [username, setUsername] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -61,10 +70,20 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     setAuthError(null);
     try {
       const data = await fetchMe();
-      setRole(data.isAdmin || data.role === 'admin' ? 'admin' : 'user');
+      const ok = Boolean(data.authenticated);
+      setAuthenticated(ok);
+      if (ok && (data.role === 'admin' || data.role === 'user')) {
+        setRole(data.role);
+        setUsername(data.username ?? null);
+      } else {
+        setRole(null);
+        setUsername(null);
+      }
     } catch {
       setAuthError('권한 정보를 불러오지 못했습니다.');
-      setRole('user');
+      setAuthenticated(false);
+      setRole(null);
+      setUsername(null);
     } finally {
       if (!options?.silent) setAuthLoading(false);
     }
@@ -74,7 +93,6 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     void refreshAuth();
   }, [refreshAuth]);
 
-  // 탭으로 돌아올 때 유휴·절대 만료를 UI에 반영 (/api/auth/me가 유효하면 유휴만 갱신)
   useEffect(() => {
     const onFocus = () => {
       void refreshAuth({ silent: true });
@@ -84,26 +102,33 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   }, [refreshAuth]);
 
   const login = useCallback(
-    async (password: string): Promise<{ ok: boolean; message: string }> => {
+    async (
+      usernameInput: string,
+      password: string,
+    ): Promise<{ ok: boolean; message: string }> => {
       setAuthError(null);
       try {
         const res = await fetch('/api/auth/login', {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password }),
+          body: JSON.stringify({
+            username: usernameInput,
+            password,
+          }),
         });
         if (!res.ok) {
           const body = (await res.json().catch(() => null)) as
             | { message?: string }
             | null;
-          const message = body?.message ?? '로그인에 실패했습니다.';
+          const message =
+            body?.message ?? '아이디 또는 비밀번호가 올바르지 않습니다.';
           setAuthError(message);
           return { ok: false, message };
         }
         await refreshAuth();
         setAdminPanel('status');
-        return { ok: true, message: '관리자로 로그인했습니다.' };
+        return { ok: true, message: '로그인했습니다.' };
       } catch {
         const message = '로그인 요청 중 오류가 발생했습니다.';
         setAuthError(message);
@@ -121,10 +146,15 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         credentials: 'include',
       });
     } catch {
-      // 세션 종료 실패 시에도 클라이언트 상태는 조회 사용자로 되돌립니다.
+      // ignore
     } finally {
-      setRole('user');
+      setAuthenticated(false);
+      setRole(null);
+      setUsername(null);
       setAdminPanel('status');
+      if (typeof window !== 'undefined') {
+        window.location.href = '/login';
+      }
     }
   }, []);
 
@@ -132,7 +162,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     (tab: SettingsTab = 'display') => {
       setSettingsTab(tab);
       if (tab === 'admin') {
-        setAdminPanel(role === 'admin' ? 'status' : 'login');
+        setAdminPanel(role === 'admin' ? 'status' : 'status');
       } else {
         setAdminPanel('status');
       }
@@ -148,8 +178,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(
     (): AdminContextValue => ({
+      authenticated,
       isAdmin: role === 'admin',
       role,
+      username,
       authLoading,
       authError,
       settingsOpen,
@@ -164,7 +196,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       refreshAuth,
     }),
     [
+      authenticated,
       role,
+      username,
       authLoading,
       authError,
       settingsOpen,

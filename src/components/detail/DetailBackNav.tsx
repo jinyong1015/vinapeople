@@ -19,8 +19,8 @@ export interface DetailBackNavProps {
 
 export function DetailBackNav({
   href,
-  label = '상세인원',
-  ariaLabel = '상세인원으로 돌아가기',
+  label = '인원 관리',
+  ariaLabel = '인원 관리로 돌아가기',
   Icon = Users,
   metas = [],
   className = '',

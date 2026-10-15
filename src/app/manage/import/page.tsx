@@ -4,6 +4,7 @@ import { useAdmin } from '@/components/providers/AdminProvider';
 import { useWorkforce } from '@/components/providers/WorkforceProvider';
 import {
   buildPersonnelFromCandidates,
+  isSupabaseDataSource,
   parsePersonnelWorkbook,
   validatePersonnelRows,
 } from '@/lib/vina';
@@ -15,9 +16,11 @@ import type {
 } from '@/lib/vina/types';
 import {
   AlertTriangle,
-  ArrowRight,
   CheckCircle2,
+  ChevronRight,
   FileSpreadsheet,
+  History,
+  LayoutDashboard,
   Lock,
   Megaphone,
   RotateCcw,
@@ -27,7 +30,48 @@ import {
 import Link from 'next/link';
 import { useCallback, useMemo, useRef, useState } from 'react';
 
-type Step = 'idle' | 'parsed' | 'validated';
+type Step = 'idle' | 'parsed' | 'validated' | 'reviewed';
+
+type ReviewTab = 'new' | 'changed' | 'errors' | 'missing';
+
+interface PreviewChange {
+  field: string;
+  label: string;
+  oldValue: string;
+  newValue: string;
+}
+
+interface PreviewResponse {
+  counts: {
+    total: number;
+    new: number;
+    changed: number;
+    unchanged: number;
+    error: number;
+    missing: number;
+  };
+  newRows: Array<{ excelRow: number; employeeNo: string; name: string }>;
+  changedRows: Array<{
+    excelRow: number;
+    employeeNo: string;
+    name: string;
+    changes: PreviewChange[];
+  }>;
+  errorRows: Array<{
+    excelRow: number;
+    employeeNo: string;
+    name: string;
+    message: string;
+  }>;
+  missingRows: Array<{
+    employeeNo: string;
+    name: string;
+    employmentStatus: string;
+  }>;
+  applyPayload: Record<string, unknown>;
+  canApply: boolean;
+  message?: string;
+}
 
 /** 반영 기준일 기본값은 오늘(로컬 달력). 파일 후보와 다르면 확인 체크 후 검증. */
 function todayAsOfDate(): string {
@@ -41,7 +85,8 @@ function todayAsOfDate(): string {
 export default function ImportPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const { isAdmin, authLoading, openSettings } = useAdmin();
-  const { dataset, applyImport, clearDataset } = useWorkforce();
+  const { dataset, applyImport, clearDataset, reload, dataSource } = useWorkforce();
+  const supabaseMode = dataSource === 'supabase' || isSupabaseDataSource();
 
   const [step, setStep] = useState<Step>('idle');
   const [fileName, setFileName] = useState('');
@@ -54,6 +99,8 @@ export default function ImportPage() {
   const [busy, setBusy] = useState(false);
   const [committedInfo, setCommittedInfo] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [preview, setPreview] = useState<PreviewResponse | null>(null);
+  const [reviewTab, setReviewTab] = useState<ReviewTab>('new');
 
   const reset = useCallback(() => {
     setStep('idle');
@@ -64,15 +111,23 @@ export default function ImportPage() {
     setValidation(null);
     setWarningsAck(false);
     setPanelError(null);
+    setPreview(null);
+    setReviewTab('new');
   }, []);
 
   const resetSeed = useCallback(async () => {
+    if (supabaseMode) {
+      setPanelError(
+        'Supabase 모드에서는 시드 초기화 대신 업로드 이력에서 복구하세요.',
+      );
+      return;
+    }
     if (!dataset) {
       setPanelError('초기화할 활성 인원 데이터가 없습니다.');
       return;
     }
     const confirmed = window.confirm(
-      `이 브라우저에 반영된 인원 데이터(${dataset.personnel.length.toLocaleString('ko-KR')}명, 기준일 ${dataset.asOfDate})를 삭제할까요?\n삭제 후 대시보드·분석·상세인원은 데이터가 없는 상태가 됩니다.`,
+      `이 브라우저에 반영된 인원 데이터(${dataset.personnel.length.toLocaleString('ko-KR')}명, 기준일 ${dataset.asOfDate})를 삭제할까요?\n삭제 후 대시보드·분석·인원 관리는 데이터가 없는 상태가 됩니다.`,
     );
     if (!confirmed) return;
 
@@ -90,7 +145,7 @@ export default function ImportPage() {
     } finally {
       setBusy(false);
     }
-  }, [clearDataset, dataset, reset]);
+  }, [clearDataset, dataset, reset, supabaseMode]);
 
   const onFile = async (file: File) => {
     setPanelError(null);
@@ -110,6 +165,7 @@ export default function ImportPage() {
       setDateAck(false);
       setValidation(null);
       setWarningsAck(false);
+      setPreview(null);
       setStep('parsed');
       if (!result.schemaOk) {
         setPanelError(
@@ -149,10 +205,60 @@ export default function ImportPage() {
     });
     setValidation(result);
     setWarningsAck(false);
+    setPreview(null);
     setStep('validated');
   };
 
-  const canCommit = useMemo(() => {
+  const runPreview = async () => {
+    if (!parsed || !validation || !validation.canApply) return;
+    if (validation.warningRows > 0 && !warningsAck) {
+      setPanelError('경고를 확인한 뒤 비교를 실행하세요.');
+      return;
+    }
+    setBusy(true);
+    setPanelError(null);
+    try {
+      const gate = await fetch('/api/admin/ping', { credentials: 'include' });
+      if (!gate.ok) {
+        setPanelError('관리자 세션이 없거나 만료되었습니다. 다시 로그인해 주세요.');
+        openSettings('admin');
+        return;
+      }
+
+      const res = await fetch('/api/admin/import/preview', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName,
+          asOfDate: validation.asOfDate,
+          candidates: validation.candidates,
+          validationIssues: validation.issues,
+        }),
+      });
+      const body = (await res.json()) as PreviewResponse;
+      if (!res.ok) {
+        throw new Error(body.message || 'DB 비교에 실패했습니다.');
+      }
+      setPreview(body);
+      setReviewTab(
+        body.counts.error > 0
+          ? 'errors'
+          : body.counts.new > 0
+            ? 'new'
+            : body.counts.changed > 0
+              ? 'changed'
+              : 'missing',
+      );
+      setStep('reviewed');
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : 'DB 비교에 실패했습니다.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const canCommitIndexed = useMemo(() => {
     if (!parsed?.schemaOk) return false;
     if (!validation?.canApply) return false;
     if (validation.warningRows > 0 && !warningsAck) return false;
@@ -160,8 +266,14 @@ export default function ImportPage() {
     return true;
   }, [parsed, validation, warningsAck, dateAck]);
 
-  const commit = async () => {
-    if (!parsed || !validation || !canCommit) return;
+  const canCommitSupabase = useMemo(() => {
+    if (!preview) return false;
+    if (preview.counts.error > 0) return false;
+    return preview.canApply;
+  }, [preview]);
+
+  const commitIndexed = async () => {
+    if (!parsed || !validation || !canCommitIndexed) return;
     setBusy(true);
     setPanelError(null);
     try {
@@ -213,6 +325,48 @@ export default function ImportPage() {
     }
   };
 
+  const commitSupabase = async () => {
+    if (!preview || !canCommitSupabase) return;
+    setBusy(true);
+    setPanelError(null);
+    try {
+      const gate = await fetch('/api/admin/ping', { credentials: 'include' });
+      if (!gate.ok) {
+        setPanelError('관리자 세션이 없거나 만료되었습니다. 다시 로그인해 주세요.');
+        openSettings('admin');
+        return;
+      }
+
+      if (!preview.applyPayload) {
+        throw new Error('반영 페이로드가 없습니다. 비교를 다시 실행하세요.');
+      }
+      const res = await fetch('/api/admin/import/apply', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName,
+          asOfDate: validation?.asOfDate ?? asOfDate,
+          counts: preview.counts,
+          applyPayload: preview.applyPayload,
+        }),
+      });
+      const body = (await res.json()) as { message?: string };
+      if (!res.ok) {
+        throw new Error(body.message || '반영에 실패했습니다.');
+      }
+      await reload();
+      setCommittedInfo(
+        `누적 반영 완료: 신규 ${preview.counts.new} · 변경 ${preview.counts.changed} · 동일 ${preview.counts.unchanged} (누락 ${preview.counts.missing}은 자동 퇴사하지 않음)`,
+      );
+      reset();
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : '반영에 실패했습니다.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const showFileStatus = Boolean(fileName || busy || parsed || dataset);
 
   if (authLoading) {
@@ -231,23 +385,23 @@ export default function ImportPage() {
         <section className="manage-panel">
           <div className="manage-panel-head">
             <div>
-              <h2 className="manage-panel-title">관리자 로그인 필요</h2>
+              <h2 className="manage-panel-title">관리자 권한 필요</h2>
               <p className="manage-panel-sub">
-                설정에서 관리자 비밀번호로 로그인한 뒤 업로드를 진행하세요.
+                데이터 업로드는 관리자 계정으로 로그인한 경우에만 사용할 수
+                있습니다. 관리자 계정으로 다시 로그인해 주세요.
               </p>
             </div>
           </div>
           <div className="manage-panel-body">
-            <button
-              type="button"
+            <a
+              href="/login"
               className="manage-action-btn manage-action-btn-primary manage-admin-login-btn"
-              onClick={() => openSettings('admin')}
             >
               <span className="manage-admin-login-btn-icon" aria-hidden>
                 <Lock size={16} strokeWidth={2.25} />
               </span>
-              관리자 로그인
-            </button>
+              로그인 화면으로
+            </a>
           </div>
         </section>
       </div>
@@ -273,24 +427,59 @@ export default function ImportPage() {
               업로드 초기화
             </button>
           ) : null}
-          <Link href="/" className="manage-action-btn">
-            <ArrowRight size={15} aria-hidden />
-            대시보드
-          </Link>
-          <button
-            type="button"
-            className="manage-action-btn manage-action-btn-danger"
-            onClick={() => void resetSeed()}
-            disabled={busy || !dataset}
-            title={
-              dataset
-                ? '이 브라우저의 활성 인원 데이터를 삭제합니다'
-                : '삭제할 활성 데이터가 없습니다'
-            }
-          >
-            <Trash2 size={15} aria-hidden />
-            시드 초기화
-          </button>
+          <nav className="manage-header-nav" aria-label="바로가기">
+            <span className="manage-header-nav-label">바로가기</span>
+            {supabaseMode ? (
+              <Link
+                href="/manage/uploads"
+                className="manage-header-nav-link"
+                title="업로드 이력 페이지로 이동"
+              >
+                <span className="manage-header-nav-icon" aria-hidden>
+                  <History size={15} strokeWidth={2.25} />
+                </span>
+                <span className="manage-header-nav-text">업로드 이력</span>
+                <ChevronRight
+                  className="manage-header-nav-chevron"
+                  size={14}
+                  strokeWidth={2.25}
+                  aria-hidden
+                />
+              </Link>
+            ) : null}
+            <Link
+              href="/"
+              className="manage-header-nav-link"
+              title="대시보드로 이동"
+            >
+              <span className="manage-header-nav-icon" aria-hidden>
+                <LayoutDashboard size={15} strokeWidth={2.25} />
+              </span>
+              <span className="manage-header-nav-text">대시보드</span>
+              <ChevronRight
+                className="manage-header-nav-chevron"
+                size={14}
+                strokeWidth={2.25}
+                aria-hidden
+              />
+            </Link>
+          </nav>
+          {!supabaseMode ? (
+            <button
+              type="button"
+              className="manage-action-btn manage-action-btn-danger"
+              onClick={() => void resetSeed()}
+              disabled={busy || !dataset}
+              title={
+                dataset
+                  ? '이 브라우저의 활성 인원 데이터를 삭제합니다'
+                  : '삭제할 활성 데이터가 없습니다'
+              }
+            >
+              <Trash2 size={15} aria-hidden />
+              시드 초기화
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -299,9 +488,13 @@ export default function ImportPage() {
         <div className="min-w-0">
           <p className="manage-notice-title">공지사항</p>
           <p className="manage-notice-body">
-            {dataset
-              ? `현재 활성 데이터: 기준일 ${dataset.asOfDate} · ${dataset.personnel.length}명 (최종 반영 전까지 유지)`
-              : '현재 활성 인원 데이터 없음 · 이 브라우저에만 저장됩니다.'}
+            {supabaseMode
+              ? dataset
+                ? `누적 데이터: 기준일 ${dataset.asOfDate} · ${dataset.personnel.length}명 · 업로드는 신규/변경만 반영합니다.`
+                : 'Supabase에 활성 인원 데이터가 없습니다. Excel을 업로드해 누적 반영하세요.'
+              : dataset
+                ? `현재 활성 데이터: 기준일 ${dataset.asOfDate} · ${dataset.personnel.length}명 (최종 반영 전까지 유지)`
+                : '현재 활성 인원 데이터 없음 · 이 브라우저에만 저장됩니다.'}
           </p>
         </div>
       </div>
@@ -382,30 +575,33 @@ export default function ImportPage() {
                 </p>
                 <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
                   {busy
-                    ? '파일 구조 검증 · 헤더 매핑 · 기준일 후보 추출 중…'
-                    : validation
-                      ? validation.canApply
-                        ? validation.warningRows > 0
-                          ? '경고 확인 후 최종 반영하세요'
-                          : '검증 완료 · 최종 반영 가능'
-                        : '오류가 있어 최종 반영할 수 없습니다'
-                      : parsed
-                        ? parsed.schemaOk
-                          ? `추출 ${parsed.rows.length}명 · 기준일 확정 필요`
-                          : '구조 오류 · 올바른 양식으로 다시 업로드'
-                        : dataset
-                          ? `업로드 완료 · 활성 ${dataset.personnel.length}명 · 기준일 ${dataset.asOfDate}`
-                          : '대기 중'}
+                    ? '처리 중…'
+                    : preview
+                      ? preview.counts.error > 0
+                        ? '비교 오류 · 반영 차단'
+                        : '비교 완료 · 최종 반영 가능'
+                      : validation
+                        ? validation.canApply
+                          ? validation.warningRows > 0
+                            ? '경고 확인 후 다음 단계로'
+                            : supabaseMode
+                              ? '검증 완료 · DB 비교를 실행하세요'
+                              : '검증 완료 · 최종 반영 가능'
+                          : '오류가 있어 최종 반영할 수 없습니다'
+                        : parsed
+                          ? parsed.schemaOk
+                            ? `추출 ${parsed.rows.length}명 · 기준일 확정 필요`
+                            : '구조 오류 · 올바른 양식으로 다시 업로드'
+                          : dataset
+                            ? `활성 ${dataset.personnel.length}명 · 기준일 ${dataset.asOfDate}`
+                            : '대기 중'}
                 </p>
               </div>
-              {!busy && validation?.canApply ? (
+              {!busy && (preview?.canApply || (!supabaseMode && validation?.canApply)) ? (
                 <CheckCircle2 size={18} style={{ color: 'var(--success)' }} />
               ) : null}
-              {!busy && (panelError || (validation && !validation.canApply) || (parsed && !parsed.schemaOk)) ? (
+              {!busy && (panelError || (validation && !validation.canApply) || (parsed && !parsed.schemaOk) || (preview && preview.counts.error > 0)) ? (
                 <AlertTriangle size={18} style={{ color: 'var(--error)' }} />
-              ) : null}
-              {!busy && !validation && !parsed && dataset ? (
-                <CheckCircle2 size={18} style={{ color: 'var(--success)' }} />
               ) : null}
             </div>
           ) : null}
@@ -458,6 +654,7 @@ export default function ImportPage() {
                 onChange={(e) => {
                   setAsOfDate(e.target.value);
                   setValidation(null);
+                  setPreview(null);
                   setStep('parsed');
                 }}
               />
@@ -506,7 +703,9 @@ export default function ImportPage() {
                 label: '전체',
                 value: validation.totalRows,
                 tone: 'accent' as const,
-                hint: `활성 ${dataset?.personnel.length ?? 0}명 → 교체`,
+                hint: supabaseMode
+                  ? '누적 비교 대상'
+                  : `활성 ${dataset?.personnel.length ?? 0}명 → 교체`,
               },
             ].map((item) => (
               <div key={item.label} className={`manage-kpi-card manage-kpi-card-${item.tone}`}>
@@ -584,13 +783,202 @@ export default function ImportPage() {
                 ) : null}
               </div>
               <div className="manage-page-actions" style={{ marginTop: 14 }}>
+                {supabaseMode ? (
+                  <button
+                    type="button"
+                    className="manage-action-btn manage-action-btn-primary"
+                    disabled={
+                      !validation.canApply ||
+                      busy ||
+                      (validation.warningRows > 0 && !warningsAck)
+                    }
+                    onClick={() => void runPreview()}
+                  >
+                    {busy ? '비교 중…' : 'DB 비교 미리보기'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="manage-action-btn manage-action-btn-primary"
+                    disabled={!canCommitIndexed || busy}
+                    onClick={() => void commitIndexed()}
+                  >
+                    {busy ? '반영 중…' : '최종 반영 (현재 데이터 교체)'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="manage-action-btn manage-action-btn-secondary"
+                  onClick={reset}
+                  disabled={busy}
+                >
+                  취소
+                </button>
+              </div>
+            </div>
+          </section>
+        </>
+      ) : null}
+
+      {preview ? (
+        <>
+          <div className="manage-kpi-grid">
+            {[
+              { label: '전체', value: preview.counts.total, tone: 'accent' as const },
+              { label: '신규', value: preview.counts.new, tone: 'ok' as const },
+              { label: '변경', value: preview.counts.changed, tone: 'warn' as const },
+              { label: '동일', value: preview.counts.unchanged, tone: 'ok' as const },
+              { label: '오류', value: preview.counts.error, tone: 'danger' as const },
+              { label: '누락', value: preview.counts.missing, tone: 'warn' as const },
+            ].map((item) => (
+              <div key={item.label} className={`manage-kpi-card manage-kpi-card-${item.tone}`}>
+                <p className="manage-kpi-label">{item.label}</p>
+                <p className="manage-kpi-value num">
+                  {item.value.toLocaleString('ko-KR')}건
+                </p>
+              </div>
+            ))}
+          </div>
+
+          <section className="manage-panel">
+            <div className="manage-panel-head">
+              <div>
+                <h2 className="manage-panel-title">누적 반영 검토</h2>
+                <p className="manage-panel-sub">
+                  파일에 없는 사번은 누락으로만 표시하며 자동 퇴사하지 않습니다.
+                </p>
+              </div>
+            </div>
+            <div className="manage-panel-body">
+              <div className="manage-page-actions mb-3" style={{ flexWrap: 'wrap' }}>
+                {(
+                  [
+                    ['new', `신규 (${preview.counts.new})`],
+                    ['changed', `변경 (${preview.counts.changed})`],
+                    ['errors', `오류 (${preview.counts.error})`],
+                    ['missing', `누락 (${preview.counts.missing})`],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`manage-action-btn${reviewTab === key ? ' manage-action-btn-primary' : ''}`}
+                    onClick={() => setReviewTab(key)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="table-wrap table-wrap-list max-h-[420px] overflow-auto">
+                {reviewTab === 'new' ? (
+                  <table className="data-table min-w-[640px] w-full text-sm">
+                    <thead>
+                      <tr>
+                        <th>Excel 행</th>
+                        <th>사번</th>
+                        <th>성명</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.newRows.map((row) => (
+                        <tr key={`n-${row.excelRow}-${row.employeeNo}`}>
+                          <td className="num">{row.excelRow}</td>
+                          <td className="num">{row.employeeNo}</td>
+                          <td>{row.name}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : null}
+
+                {reviewTab === 'changed' ? (
+                  <table className="data-table min-w-[880px] w-full text-sm">
+                    <thead>
+                      <tr>
+                        <th>사번</th>
+                        <th>성명</th>
+                        <th>항목</th>
+                        <th>기존</th>
+                        <th>신규</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.changedRows.flatMap((row) =>
+                        row.changes.map((change, idx) => (
+                          <tr key={`c-${row.employeeNo}-${change.field}-${idx}`}>
+                            <td className="num">{row.employeeNo}</td>
+                            <td>{row.name}</td>
+                            <td>{change.label}</td>
+                            <td>{change.oldValue || '-'}</td>
+                            <td>{change.newValue || '-'}</td>
+                          </tr>
+                        )),
+                      )}
+                    </tbody>
+                  </table>
+                ) : null}
+
+                {reviewTab === 'errors' ? (
+                  <table className="data-table min-w-[720px] w-full text-sm">
+                    <thead>
+                      <tr>
+                        <th>Excel 행</th>
+                        <th>사번</th>
+                        <th>성명</th>
+                        <th>사유</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.errorRows.map((row, idx) => (
+                        <tr key={`e-${row.excelRow}-${idx}`}>
+                          <td className="num">{row.excelRow}</td>
+                          <td className="num">{row.employeeNo || '-'}</td>
+                          <td>{row.name || '-'}</td>
+                          <td>{row.message}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : null}
+
+                {reviewTab === 'missing' ? (
+                  <table className="data-table min-w-[640px] w-full text-sm">
+                    <thead>
+                      <tr>
+                        <th>사번</th>
+                        <th>성명</th>
+                        <th>근무현황</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.missingRows.map((row) => (
+                        <tr key={`m-${row.employeeNo}`}>
+                          <td className="num">{row.employeeNo}</td>
+                          <td>{row.name}</td>
+                          <td>{row.employmentStatus || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : null}
+
+                {((reviewTab === 'new' && preview.newRows.length === 0) ||
+                  (reviewTab === 'changed' && preview.changedRows.length === 0) ||
+                  (reviewTab === 'errors' && preview.errorRows.length === 0) ||
+                  (reviewTab === 'missing' && preview.missingRows.length === 0)) && (
+                  <p className="text-muted px-4 py-6 text-center text-sm">해당 항목 없음</p>
+                )}
+              </div>
+
+              <div className="manage-page-actions" style={{ marginTop: 14 }}>
                 <button
                   type="button"
                   className="manage-action-btn manage-action-btn-primary"
-                  disabled={!canCommit || busy}
-                  onClick={() => void commit()}
+                  disabled={!canCommitSupabase || busy}
+                  onClick={() => void commitSupabase()}
                 >
-                  {busy ? '반영 중…' : '최종 반영 (현재 데이터 교체)'}
+                  {busy ? '반영 중…' : '최종 반영 (누적)'}
                 </button>
                 <button
                   type="button"
